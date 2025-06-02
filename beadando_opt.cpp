@@ -14,7 +14,7 @@ const double beta = 5.0;
 const double gamma = 8;
 const double omega = 0.5;
 
-// Állapot vektor: x és y    2 double a structban, 16 bájtot foglal a memóriában, egyszerűbb vele de futni ugyanolyan gyorsan fut [\,megnézni mennyi a memória]
+// Állapot vektor: x és y    2 double a structban, 16 bájtot foglal a memóriában, egyszerűbb vele de futni ugyanolyan gyorsan fut 
 struct Állapot
 {
     double x;
@@ -23,7 +23,7 @@ struct Állapot
 
 // Duffing rendszer jobb oldala (deriváltak)
 Állapot duffing_rhs(const Állapot &s, double t)
-{               // bemenetnek vár egy structot amit nem belemásolok, hanem a memóriacímet kapja meg de nem változtathatja, ez így gyorsabb [\,opt1]
+{               // bemenetnek vár egy structot amit nem belemásolok, hanem a memóriacímet kapja meg de nem változtathatja, ez így gyorsabb 
     Állapot ds; //
     ds.x = s.y;
     ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma * std::cos(omega * t); // [\,opt cosinuszt?]
@@ -44,13 +44,13 @@ struct Állapot
     return s_next;
 }
 
-// Egyetlen szimuláció külön fájlba írással, párhuzamosan is hívható
+
 void run_simulation(double x0, int index)
 {
     double dt = 0.01;
     double T = 2 * M_PI / omega;
 
-    // Fázistér szimuláció (rövidebb)
+    // Fázistér szimuláció 
     double t_max_fazis = 1000.0;  
     Állapot s = {x0, 0.0};
 
