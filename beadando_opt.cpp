@@ -3,6 +3,7 @@
 #include <vector>
 #include <future>
 #include <chrono>
+#include <thread>
 #define _USE_MATH_DEFINES
 #include <cmath>
 
@@ -11,7 +12,7 @@
 const double delta = 0.02;
 const double alpha = 1.0;
 const double beta = 5.0;
-const double gamma = 8;
+const double gamma_param = 8;
 const double omega = 0.5;
 
 // Állapot vektor: x és y    2 double a structban, 16 bájtot foglal a memóriában, egyszerűbb vele de futni ugyanolyan gyorsan fut 
@@ -26,7 +27,7 @@ struct Állapot
 {               // bemenetnek vár egy structot amit nem belemásolok, hanem a memóriacímet kapja meg de nem változtathatja, ez így gyorsabb 
     Állapot ds; //
     ds.x = s.y;
-    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma * std::cos(omega * t); // [\,opt cosinuszt?]
+    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma_param * std::cos(omega * t); // [\,opt cosinuszt?]
     return ds;
 }
 
@@ -89,22 +90,61 @@ void run_simulation(double x0, int index)
 }
 
 
-// A párhuzamos szimulációkat elindító main függvény, annyi kezdeti feltételből indít el futást, ahány szál a gépen elérhető
-int main()
+void run_simulation_batch(int start_idx, int count, double x_start, double x_end, int total_points)
+{
+    for (int j = 0; j < count; ++j)
+    {
+        int idx = start_idx + j;
+        double ratio = total_points > 1 ? static_cast<double>(idx) / (total_points - 1) : 0.0;
+        double x0 = x_start + ratio * (x_end - x_start);
+        run_simulation(x0, idx);
+    }
+}
+
+
+// A párhuzamos szimulációkat elindító main függvény
+int main(int argc, char* argv[])
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    int szalak = std::thread::hardware_concurrency(); // ennyi szál érhető el
+    int total_points = 10;
+    double interval_start = 0.0;
+    double interval_end = 1.0;
+
+    if (argc > 1)
+        total_points = std::stoi(argv[1]);
+    if (argc > 2)
+        interval_start = std::stod(argv[2]);
+    if (argc > 3)
+        interval_end = std::stod(argv[3]);
+
+    if (total_points <= 0)
+    {
+        std::cerr << "A kezdőpontok számának nagyobbnak kell lennie nullánál.\n";
+        return 1;
+    }
+
+    unsigned int szalak = std::thread::hardware_concurrency();
+    if (szalak == 0)
+        szalak = 1;
+    if (static_cast<unsigned int>(total_points) < szalak)
+        szalak = total_points;
 
     std::vector<std::future<void>> futures;
 
-    for (int i = 0; i < szalak; ++i)
+    int points_per_thread = total_points / szalak;
+    int remainder = total_points % szalak;
+    int start_index = 0;
+    for (unsigned int i = 0; i < szalak; ++i)
     {
-        double x0 = 0.1 + 0.05 * i; // különböző kezdeti x értékek
-        futures.push_back(std::async(std::launch::async, run_simulation, x0, i));
+        int count = points_per_thread + (i < static_cast<unsigned int>(remainder) ? 1 : 0);
+        int thread_start = start_index;
+        futures.push_back(std::async(std::launch::async, [=]() {
+            run_simulation_batch(thread_start, count, interval_start, interval_end, total_points);
+        }));
+        start_index += count;
     }
 
-    // Megvárjuk, míg az összes szimuláció befejeződik
     for (auto &f : futures)
     {
         f.get();
@@ -112,7 +152,7 @@ int main()
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    std::cout << "Összesen " << szalak << " szimuláció futott le pacekul " << duration << " ms alatt.\n";
+    std::cout << "Összesen " << total_points << " szimuláció futott le " << duration << " ms alatt.\n";
 
     return 0;
 }
