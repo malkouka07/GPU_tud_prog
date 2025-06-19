@@ -6,12 +6,17 @@
 #define _USE_MATH_DEFINES
 #include <cmath>
 
+// A program futásának konfigurálható paraméterei
+const int DEFAULT_START_POINTS = 10;
+const double DEFAULT_X_MIN = -1.0;
+const double DEFAULT_X_MAX = 1.0;
+
 
 // Duffing egyenlet paraméterei
 const double delta = 0.02;
 const double alpha = 1.0;
 const double beta = 5.0;
-const double gamma = 8;
+const double gamma_ = 8; // 'gamma' konfliktus a <cmath> gamma függvénnyel
 const double omega = 0.5;
 
 // Állapot vektor: x és y    2 double a structban, 16 bájtot foglal a memóriában, egyszerűbb vele de futni ugyanolyan gyorsan fut 
@@ -26,7 +31,7 @@ struct Állapot
 {               // bemenetnek vár egy structot amit nem belemásolok, hanem a memóriacímet kapja meg de nem változtathatja, ez így gyorsabb 
     Állapot ds; //
     ds.x = s.y;
-    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma * std::cos(omega * t); // [\,opt cosinuszt?]
+    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma_ * std::cos(omega * t); // [\,opt cosinuszt?]
     return ds;
 }
 
@@ -90,18 +95,43 @@ void run_simulation(double x0, int index)
 
 
 // A párhuzamos szimulációkat elindító main függvény, annyi kezdeti feltételből indít el futást, ahány szál a gépen elérhető
-int main()
+int main(int argc, char *argv[])
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    int szalak = std::thread::hardware_concurrency(); // ennyi szál érhető el
+    // Parancssori argumentumok feldolgozása
+    int total_points = DEFAULT_START_POINTS;
+    double x_min = DEFAULT_X_MIN;
+    double x_max = DEFAULT_X_MAX;
+
+    if (argc > 1)
+        total_points = std::stoi(argv[1]);
+    if (argc > 2)
+        x_min = std::stod(argv[2]);
+    if (argc > 3)
+        x_max = std::stod(argv[3]);
+
+    unsigned int szalak = std::thread::hardware_concurrency();
+    if (szalak == 0)
+        szalak = 1; // ha nem tudja megállapítani, fusson egy szálon
+
+    if (static_cast<unsigned int>(total_points) < szalak)
+        szalak = total_points;
 
     std::vector<std::future<void>> futures;
+    double dx = (total_points > 1) ? (x_max - x_min) / (total_points - 1) : 0.0;
 
-    for (int i = 0; i < szalak; ++i)
+    for (unsigned int thread_id = 0; thread_id < szalak; ++thread_id)
     {
-        double x0 = 0.1 + 0.05 * i; // különböző kezdeti x értékek
-        futures.push_back(std::async(std::launch::async, run_simulation, x0, i));
+        futures.push_back(std::async(std::launch::async, [=]() {
+            int start_index = thread_id * total_points / szalak;
+            int end_index = (thread_id + 1) * total_points / szalak;
+            for (int i = start_index; i < end_index; ++i)
+            {
+                double x0 = x_min + i * dx;
+                run_simulation(x0, i);
+            }
+        }));
     }
 
     // Megvárjuk, míg az összes szimuláció befejeződik
