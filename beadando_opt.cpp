@@ -3,6 +3,7 @@
 #include <vector>
 #include <future>
 #include <chrono>
+#include <thread>
 #define _USE_MATH_DEFINES
 #include <cmath>
 
@@ -11,7 +12,7 @@
 const double delta = 0.02;
 const double alpha = 1.0;
 const double beta = 5.0;
-const double gamma = 8;
+const double gamma_par = 8;
 const double omega = 0.5;
 
 // Állapot vektor: x és y    2 double a structban, 16 bájtot foglal a memóriában, egyszerűbb vele de futni ugyanolyan gyorsan fut 
@@ -26,7 +27,7 @@ struct Állapot
 {               // bemenetnek vár egy structot amit nem belemásolok, hanem a memóriacímet kapja meg de nem változtathatja, ez így gyorsabb 
     Állapot ds; //
     ds.x = s.y;
-    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma * std::cos(omega * t); // [\,opt cosinuszt?]
+    ds.y = -delta * s.y - alpha * s.x - beta * s.x * s.x * s.x + gamma_par * std::cos(omega * t); // [\,opt cosinuszt?]
     return ds;
 }
 
@@ -44,48 +45,52 @@ struct Állapot
     return s_next;
 }
 
+struct SimulationResult
+{
+    int index;
+    std::vector<Állapot> phase;
+    std::vector<Állapot> poincare;
+};
 
-void run_simulation(double x0, int index)
+
+SimulationResult run_simulation(double x0, int index)
 {
     double dt = 0.01;
     double T = 2 * M_PI / omega;
 
-    // Fázistér szimuláció 
-    double t_max_fazis = 1000.0;  
+    // Fázistér szimuláció
+    double t_max_fazis = 1000.0;
     Állapot s = {x0, 0.0};
 
-    std::ofstream fout_phase("duffing_out_" + std::to_string(index) + ".csv");
-    fout_phase << "x,y\n";
+    std::vector<Állapot> phase_data;
+    phase_data.reserve(static_cast<size_t>(t_max_fazis / dt));
 
     for (double t = 0; t < t_max_fazis; t += dt)
     {
         s = rk4_step(s, t, dt);
-        fout_phase << s.x << "," << s.y << "\n";
+        phase_data.push_back(s);
     }
 
-    fout_phase.close();
-
     // Poincaré szimuláció, ez hosszabb, hogy mutassa a kaotikus viselkedést
-    double t_max_poincare = 10000000.0;  
+    double t_max_poincare = 10000000.0;
 
 
     s = {x0, 0.0};
     double next_poincare_time = 0.0;
 
-    std::ofstream fout_poincare("duffing_out_poincare_" + std::to_string(index) + ".csv");
-    fout_poincare << "x,y\n";
+    std::vector<Állapot> poincare_data;
 
     for (double t = 0; t < t_max_poincare; t += dt)
     {
         s = rk4_step(s, t, dt);
         if (std::abs(t - next_poincare_time) < dt / 2.0)
         {
-            fout_poincare << s.x << "," << s.y << "\n";
+            poincare_data.push_back(s);
             next_poincare_time += T;
         }
     }
 
-    fout_poincare.close();
+    return {index, std::move(phase_data), std::move(poincare_data)};
 }
 
 
@@ -96,7 +101,7 @@ int main()
 
     int szalak = std::thread::hardware_concurrency(); // ennyi szál érhető el
 
-    std::vector<std::future<void>> futures;
+    std::vector<std::future<SimulationResult>> futures;
 
     for (int i = 0; i < szalak; ++i)
     {
@@ -104,11 +109,32 @@ int main()
         futures.push_back(std::async(std::launch::async, run_simulation, x0, i));
     }
 
-    // Megvárjuk, míg az összes szimuláció befejeződik
+    std::vector<SimulationResult> results;
     for (auto &f : futures)
     {
-        f.get();
+        results.push_back(f.get());
     }
+
+    std::ofstream fout_phase("duffing_phase.csv");
+    fout_phase << "index,x,y\n";
+
+    std::ofstream fout_poincare("duffing_poincare.csv");
+    fout_poincare << "index,x,y\n";
+
+    for (const auto &res : results)
+    {
+        for (const auto &st : res.phase)
+        {
+            fout_phase << res.index << ',' << st.x << ',' << st.y << "\n";
+        }
+        for (const auto &st : res.poincare)
+        {
+            fout_poincare << res.index << ',' << st.x << ',' << st.y << "\n";
+        }
+    }
+
+    fout_phase.close();
+    fout_poincare.close();
 
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
