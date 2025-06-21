@@ -10,20 +10,20 @@
 
 
 
-// Duffing egyenlet paraméterei
+// Duffing egyenlet paraméterei, amelyek a wikipedian szerepelnek https://en.wikipedia.org/wiki/Duffing_equation
 const double DELTA = 0.02;
 const double ALPHA = 1.0;
 const double BETA = 5.0;
 const double GAMMA = 8;
 const double OMEGA = 0.5;
 
-// Állapot vektor
+// Állapot vektor, structként csináltam, 
 struct State
 {
     double x;
     double y;
 };
-
+                        
 // Szimuláció eredményének típusa (fázistér + Poincaré)
 struct SimulationResult {
     double initial_x; // azért, hogy tudjuk, melyik kezdőfeltételhez tartozik az eredmény
@@ -32,7 +32,7 @@ struct SimulationResult {
 };
 
 // Duffing rendszer jobb oldala (deriváltak)
-State duffing_rhs(const State &state, double t)
+State duffing_rhs(const State &state, double t)          //Itt hivatkozok az állapotra így nem változtatja
 {
     State ds;
     ds.x = state.y;
@@ -63,8 +63,8 @@ SimulationResult run_simulation(double initial_x)
     double period = 2 * M_PI / OMEGA;
 
     // Fázistér szimuláció
-    double t_max_phase = 100.0;
-    State state = {initial_x, 0.0};
+    double t_max_phase = 1000.0;
+    State state = {initial_x, 1};   //a kezdeti sebesseg erteke 1
 
     std::vector<std::pair<double, double>> phase_data; // fázistér adatok tárolása, hogy vissza tudja küldeni a száll
 
@@ -78,8 +78,8 @@ SimulationResult run_simulation(double initial_x)
     }
 
     // Poincaré szimuláció
-    double t_max_poincare = 1000.0;
-    state = {initial_x, 0.0};
+    double t_max_poincare = 10000.0;
+    state = {initial_x, 1.0};
     double next_poincare_time = 0.0;
 
 
@@ -97,19 +97,19 @@ SimulationResult run_simulation(double initial_x)
     }
 
     return {initial_x, phase_data, poincare_data}; // visszatér a szimuláció eredményével, nem ír a fájlba
-}
+}                                                   //az előző verzióhoz képest, ahol minden szál külön kiírta
 
 int main()
 {
     auto start_time = std::chrono::high_resolution_clock::now();
 
     int num_threads = std::thread::hardware_concurrency();
-    int num_initials = 1000; // Kezdőfeltételek száma
+    int num_initials = 50; // Ennyi pontot szeretnénk követni a fázistérben 
 
     // Generáljuk a kezdőfeltételeket
     std::vector<double> initial_xs(num_initials);
     for (int i = 0; i < num_initials; ++i)
-        initial_xs[i] = 0.1 + 0.05 * i;
+        initial_xs[i] = 1 + (1.0/30.0) * i;
 
     // Minden szálra kiosztjuk a kezdőfeltételek egy részét
     std::vector<std::future<std::vector<SimulationResult>>> futures; // a future nem void értékű,
@@ -131,8 +131,8 @@ int main()
 
     // Eredmények összegyűjtése
     std::vector<SimulationResult> all_results;
-    for (auto& fut : futures)
-    {
+    for (auto& fut : futures)   //bonyolult a futures vektor, az elemek simres struktokat tartalmazó vektorok, így 
+    {                              //auto betippeli ezt 
         auto res = fut.get(); // megvárja amig a száll végez es lekériaz eredményát
         all_results.insert(all_results.end(), res.begin(), res.end()); // c+++11-től kezdve a vektorok összefűzése
         // hatékonyabb, mint a korábbi push_back módszer, így nem kell külön vektorokat létrehozni
@@ -140,8 +140,9 @@ int main()
 
     // Rendezés kezdőfeltétel szerint, annak segitsegevel hogy a structunk SimulationResult tartalmaz egy initial_x mezőt
     std::sort(all_results.begin(), all_results.end(), [](const SimulationResult& a, const SimulationResult& b) {
-        return a.initial_x < b.initial_x;
-    });
+        return a.initial_x < b.initial_x;   //ez a lambda compare function 
+    }); // a plottolás miatt nem kéne sorbarendezni, csak ha az egymás melletti kezdőfeltételeket
+        //vizsgáljuk adott időre, akkor ez segít, így könnyebb megfigyelni a kaotikus viselkedést
 
     // Fázistér eredmények kiírása, kezdőfeltételenként, üres sorokkal elválasztva
     std::ofstream fout_phase("duffing_all_phase.csv");

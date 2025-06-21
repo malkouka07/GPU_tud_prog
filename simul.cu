@@ -14,7 +14,7 @@ struct State
     double y;
 };
 
-// Duffing egyenlet CUDA device függvény
+//csak a device-n futtatható függvény
 __device__ State duffing_rhs(State state, double t)
 {
     State ds;
@@ -23,7 +23,7 @@ __device__ State duffing_rhs(State state, double t)
     return ds;
 }
 
-// RK4 CUDA device függvény
+// RK4 
 __device__ State rk4_step(State state, double t, double dt)
 {
     State k1 = duffing_rhs(state, t);
@@ -39,15 +39,15 @@ __device__ State rk4_step(State state, double t, double dt)
 
 // CUDA kernel: minden szál egy initial_x-hez tartozó szimulációt futtat
 __global__ void run_simulation_kernel(
-    double *initial_xs, double *phase_x, double *phase_y,
+    double *initial_xs, double *phase_x, double *phase_y,   
     int num_initials, int num_steps, double dt)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;   //az összes szál indexe
     if (idx >= num_initials)
-        return;
+        return;   //eldobjuk azokat a szálakat, amik nem kellenek 
 
     double x0 = initial_xs[idx];
-    State state = {x0, 0.0};
+    State state = {x0, 1.0};
     double t = 0.0;
 
     for (int step = 0; step < num_steps; ++step)
@@ -59,10 +59,27 @@ __global__ void run_simulation_kernel(
     }
 }
 
+int blokkszamolo(int num_initials)
+{
+    int ketto_hatvany = 1; 
+    while (ketto_hatvany < num_initials) {
+        ketto_hatvany *= 2; // Következő 2 hatvány
+    }
+    return ketto_hatvany;
+}
+
 int main()
 {
-    int num_initials = 1000;
-    int num_steps = 1000; // például 100.0 idő, 0.01 lépésköz
+
+        // Időmérés kezdete
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+
+    int num_initials = 50;
+    int num_steps = 1000; 
     double dt = 0.01;
 
     // Host oldali adatok
@@ -71,7 +88,7 @@ int main()
     double *h_phase_y = new double[num_initials * num_steps];
 
     for (int i = 0; i < num_initials; ++i)
-        h_initial_xs[i] = 0.1 + 0.05 * i;
+        h_initial_xs[i] = 1 + (1.0/30.0) * i;
 
     // Device oldali adatok
     double *d_initial_xs, *d_phase_x, *d_phase_y;
@@ -81,29 +98,27 @@ int main()
 
     cudaMemcpy(d_initial_xs, h_initial_xs, num_initials * sizeof(double), cudaMemcpyHostToDevice);
 
-    // Időmérés kezdete
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start);
 
     // Kernel indítása
-    int blockSize = 128;
+    int blockSize = blokkszamolo(num_initials); //100 kezdeti feltételhez a 128 is jó lenne
     int gridSize = (num_initials + blockSize - 1) / blockSize;
     run_simulation_kernel<<<gridSize, blockSize>>>(d_initial_xs, d_phase_x, d_phase_y, num_initials, num_steps, dt);
-    cudaDeviceSynchronize();
+    cudaDeviceSynchronize();  //meg kell adni a számát a szálaknak, hogy mindegyiknek legyen id je
+                              //aszinkron módon indulnak a szálak, a CPU tovább menne,
+                              //de a GPU szálai által számolt dolgokat akarjuk kiírni, bevárjuk
+
 
     // Időmérés vége
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-    std::cout << "Kernel futási ideje: " << milliseconds << " ms" << std::endl;
+    std::cout << "Kernelek futásának ideje: " << milliseconds << " ms" << std::endl;
 
     // Szálak és szimulációk összefoglalása
     std::cout << "Összefoglaló:" << std::endl;
-    std::cout << "  Szálak száma (blockSize): " << blockSize << std::endl;
-    std::cout << "  Grid méret (gridSize): " << gridSize << std::endl;
+    std::cout << "  Block mérete : " << blockSize << std::endl;
+    std::cout << "  Grid méret : " << gridSize << std::endl;
     std::cout << "  Összes indított CUDA szál: " << (blockSize * gridSize) << std::endl;
     std::cout << "  Szimulációk száma: " << num_initials << std::endl;
     std::cout << "  Egy szimuláció lépései: " << num_steps << std::endl;
